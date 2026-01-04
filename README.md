@@ -4,7 +4,7 @@ A universal settings UI framework for SPT (Single Player Tarkov) mods. Provides 
 
 <img width="201" height="208" alt="MH" src="https://github.com/user-attachments/assets/56bf3fea-df5d-440b-afa2-241b242b37af" />
 
-**Version:** 1.1.1
+**Version:** 1.2.0
 
 ---
 
@@ -14,7 +14,7 @@ A universal settings UI framework for SPT (Single Player Tarkov) mods. Provides 
 - **Dark theme UI** inspired by Tarkov/Steam aesthetic
 - **Mod library** with icons, tags, and grid layout
 - **Favorites system** - pin important mods to the top
-- **Hide mods** - declutter your list by hiding unwanted mods
+- **Hide mods** - declutter your list by hiding unwanted mods (auto-tagged as "Hidden")
 - **Search & Filter** - find mods by name, description, or tags
 - **Custom tags** - organize mods with your own tags
 - **Image carousel** - view mod screenshots and banners
@@ -22,13 +22,14 @@ A universal settings UI framework for SPT (Single Player Tarkov) mods. Provides 
 - **Accent colors** - customize UI with 7 color themes
 - **Hotkey support** - F10 by default (configurable)
 - **Auto-discovery** - automatically finds all BepInEx plugins
+- **Icon caching** - generated icons cached for instant loading
 
 ### For Developers
-- Simple attribute-based API
-- Support for BepInEx ConfigEntry
+- **Simple registration** - just metadata, settings auto-discovered from BepInEx ConfigEntry
+- Support for BepInEx ConfigEntry (auto-detected)
 - Custom icons and image carousels
 - Section grouping with collapsible headers
-- Advanced field visibility toggle
+- Advanced sections hidden by naming convention (`[Debug]`, `[Adv]`)
 - Callbacks for save/reset events
 
 ---
@@ -49,7 +50,7 @@ All installed BepInEx mods are automatically discovered and displayed.
 
 ### Mod Cards
 Each mod appears as a card with:
-- **Icon** - custom or auto-generated initials
+- **Icon** - custom or auto-generated initials (cached for fast loading)
 - **Name & Version**
 - **Author**
 - **Tags** - native (from mod) and custom (from you)
@@ -61,10 +62,10 @@ Click a card to open the mod's settings page.
 | Button | Action |
 |--------|--------|
 | **<3** | Add/remove from favorites (favorites appear first) |
-| **x** | Hide mod from main list |
+| **x** | Hide mod from main list (adds "Hidden" tag automatically) |
 | **+** | Show hidden mod (in Hidden section) |
 
-Hidden mods appear in a collapsible "Hidden" section at the bottom.
+Hidden mods appear in a collapsible "Hidden" section at the bottom and are automatically tagged.
 
 ### Search & Filter
 
@@ -99,6 +100,12 @@ Each mod's settings page shows:
 - **< Back** or **ESC** - return to mod list (discards unsaved changes)
 - **Save** - save and keep changes
 
+### Advanced Settings (ADV button)
+
+The **ADV** button in the header toggles visibility of advanced/debug sections:
+- Sections named `[Debug]...`, `[Adv]...`, `0. Debug`, `Debug...`, or `Advanced...` are hidden by default
+- Click **ADV** to show them
+
 ### Mod Hub Settings
 
 Click **Cfg** in the header to configure Mod Hub itself:
@@ -113,45 +120,75 @@ Click **Cfg** in the header to configure Mod Hub itself:
 
 ## For Mod Developers
 
-### Quick Start
+### Quick Start (Recommended)
 
-Add Mod Hub as a soft dependency and register your settings:
+The simplest way to integrate - just provide metadata, settings are auto-discovered from your BepInEx config:
 
 ```csharp
 using BepInEx;
 using UIFramework.API;
-using UIFramework.Attributes;
 
 [BepInPlugin("com.example.mymod", "My Mod", "1.0.0")]
 [BepInDependency("hakusai.modhub", BepInDependency.DependencyFlags.SoftDependency)]
 public class Plugin : BaseUnityPlugin
 {
-    public static MySettings Settings;
+    // Your ConfigEntry fields
+    public static ConfigEntry<bool> EnableFeature;
+    public static ConfigEntry<float> Intensity;
 
     void Awake()
     {
-        // Check if Mod Hub is available
+        // Bind configs FIRST
+        EnableFeature = Config.Bind("General", "Enable Feature", true, "Enables the main feature");
+        Intensity = Config.Bind("General", "Intensity", 0.5f,
+            new ConfigDescription("Effect intensity", new AcceptableValueRange<float>(0f, 1f)));
+
+        // Register with Mod Hub (metadata only - settings auto-discovered)
         if (BepInEx.Bootstrap.Chainloader.PluginInfos.ContainsKey("hakusai.modhub"))
         {
-            Settings = new MySettings();
-            UIFApi.Register(Settings);
-            Logger.LogInfo("Registered with Mod Hub");
+            UIFApi.Register(new MyModInfo());
         }
     }
 }
 
-[UIFMod("mymod", "My Mod", "1.0.0")]
-[UIFAuthor("YourName")]
-[UIFDescription("My awesome mod")]
-[UIFTags("Gameplay", "QoL")]
-[UIFIcon("icon.png")]
+// Simple metadata class - no settings needed!
+public class MyModInfo : UIFModBase
+{
+    public override string ModId => "com.example.mymod";
+    public override string ModName => "My Mod";
+    public override string ModVersion => "1.0.0";
+    public override string ModAuthor => "YourName";
+    public override string Description => "My awesome mod";
+    public override string[] Tags => new[] { "Gameplay", "QoL" };
+    public override string IconPath => "icon.png";
+}
+```
+
+That's it! All your `ConfigEntry` fields are automatically displayed in Mod Hub.
+
+### Advanced Sections
+
+To hide sections from normal users, name them with special prefixes:
+
+```csharp
+// These sections are hidden unless ADV is enabled:
+Config.Bind("[Debug] Logging", "Verbose", false);
+Config.Bind("[Adv] Tweaks", "Experimental", false);
+Config.Bind("0. Debug", "Show Overlay", false);
+Config.Bind("Debug Settings", "Log Level", 1);
+Config.Bind("Advanced", "Expert Mode", false);
+```
+
+### Legacy/Hybrid Mode
+
+If you need custom UI controls or want to use UIFramework attributes, implement `GetSettings()`:
+
+```csharp
 public class MySettings : UIFModBase
 {
     public override string ModId => "mymod";
     public override string ModName => "My Mod";
-    public override string ModVersion => "1.0.0";
-    public override string ModAuthor => "YourName";
-    public override object GetSettings() => this;
+    public override object GetSettings() => this;  // Return self for attribute-based UI
 
     [UIFSection("General", 1)]
     [UIFName("Enable Feature")]
@@ -193,20 +230,7 @@ BepInEx/plugins/MyMod/
 **Icon fallback order:**
 1. Path specified in `[UIFIcon("path")]`
 2. `icon.png` in mod folder
-3. Auto-generated initials icon
-
-### Adding a Custom Icon
-
-```csharp
-[UIFMod("mymod", "My Mod", "1.0.0")]
-[UIFIcon("icon.png")]  // Relative to your plugin folder
-public class MySettings : UIFModBase { ... }
-```
-
-Or specify images via attribute:
-```csharp
-[UIFImages("images/banner1.png", "images/banner2.png")]
-```
+3. Auto-generated initials icon (cached in `BepInEx/cache/ModHub/icons/`)
 
 ### Mod-Level Attributes
 
@@ -242,6 +266,7 @@ Or specify images via attribute:
 | `int`, `float`, `double` | Text field or slider (with `[UIFRange]`) |
 | `string` | Text field |
 | `enum` | Dropdown selector |
+| `[Flags] enum` | Multi-select checkboxes |
 | `Color` | Color picker with RGB sliders + presets |
 | `Vector2`, `Vector3` | Multi-field input (X, Y, Z) |
 | `KeyCode` | Key selector dropdown |
@@ -294,7 +319,9 @@ public override void OnSettingsReset()
 
 Available predefined tags for categorization:
 
-`AI`, `Audio`, `Ballistics`, `Bots`, `Cheats`, `Debug`, `Economy`, `Flea`, `Gameplay`, `Graphics`, `Hideout`, `Items`, `Maps`, `Medical`, `Performance`, `QoL`, `Quests`, `Realism`, `Skills`, `Traders`, `UI`, `Weapons`
+`AI`, `Audio`, `Ballistics`, `Bots`, `Cheats`, `Debug`, `Economy`, `Flea`, `Gameplay`, `Graphics`, `Hidden`, `Hideout`, `Items`, `Maps`, `Medical`, `Performance`, `QoL`, `Quests`, `Realism`, `Skills`, `Traders`, `UI`, `Weapons`
+
+Note: `Hidden` is a system tag automatically applied to hidden mods.
 
 ---
 
@@ -317,6 +344,14 @@ BepInEx/config/hakusai.modhub.cfg
 ---
 
 ## Changelog
+
+### v1.1.1 - 1.2.0
+- **Simplified mod registration** - just metadata, ConfigEntry auto-discovered from BepInEx
+- **Advanced sections by name** - sections with `[Debug]`, `[Adv]`, `Debug`, `Advanced` prefixes hidden when ADV off
+- **Icon caching** - generated icons cached in `BepInEx/cache/ModHub/icons/` for instant loading
+- **Hidden tag** - hidden mods automatically get "Hidden" system tag
+- **Deferred loading** - mods registering during Awake() now work correctly
+- Fixed icon/image loading for natively registered mods
 
 ### v1.1.0
 - Added UI scaling (1x, 2x, 3x) for different monitor sizes
