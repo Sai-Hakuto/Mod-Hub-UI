@@ -4,7 +4,7 @@ A universal settings UI framework for SPT (Single Player Tarkov) mods. Provides 
 
 <img width="201" height="208" alt="MH" src="https://github.com/user-attachments/assets/56bf3fea-df5d-440b-afa2-241b242b37af" />
 
-**Version:** 1.1.0
+**Version:** 1.1.1
 
 ---
 
@@ -15,7 +15,7 @@ A universal settings UI framework for SPT (Single Player Tarkov) mods. Provides 
 - **Mod library** with icons, tags, and grid layout
 - **Favorites system** - pin important mods to the top
 - **Hide mods** - declutter your list by hiding unwanted mods
-- **Search & Filter** - find mods by name or tags
+- **Search & Filter** - find mods by name, description, or tags
 - **Custom tags** - organize mods with your own tags
 - **Image carousel** - view mod screenshots and banners
 - **UI scaling** - supports 1x, 2x (1.25), 3x (1.5) for different monitor sizes
