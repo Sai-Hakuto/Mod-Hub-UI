@@ -1001,9 +1001,12 @@ namespace UIFramework.UI.Pages
 
             _tagPopupScroll = GUILayout.BeginScrollView(_tagPopupScroll, GUILayout.Height(scrollHeight));
 
-            // System tags first (filtered)
+            // System tags first (filtered, skip Hidden - it's managed automatically)
             foreach (var tag in ModRegistry.SystemTags)
             {
+                if (tag.Equals("Hidden", StringComparison.OrdinalIgnoreCase))
+                    continue;
+
                 if (string.IsNullOrEmpty(searchQuery) || tag.ToLower().Contains(searchQuery))
                 {
                     DrawTagRow(tag, isSystem: true, scale);

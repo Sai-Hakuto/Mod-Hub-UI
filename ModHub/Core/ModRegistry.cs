@@ -25,13 +25,17 @@ namespace UIFramework.Core
         private HashSet<string> _customTags = new HashSet<string>();
         private Dictionary<string, HashSet<string>> _modTags = new Dictionary<string, HashSet<string>>();
 
+        // Icon cache directory
+        private static readonly string IconCacheDir = Path.Combine(BepInEx.Paths.CachePath, "ModHub", "icons");
+
         // System tags - predefined, cannot be deleted
         private static readonly HashSet<string> _systemTags = new HashSet<string>(StringComparer.OrdinalIgnoreCase)
         {
             "AI", "Weapons", "Graphics", "Audio", "UI", "Gameplay",
             "Performance", "Realism", "QoL", "Cheats", "Debug",
             "Bots", "Items", "Maps", "Quests", "Traders", "Skills",
-            "Medical", "Ballistics", "Economy", "Flea", "Hideout"
+            "Medical", "Ballistics", "Economy", "Flea", "Hideout",
+            "Hidden"
         };
 
         public IReadOnlyDictionary<string, ModInfo> Mods => _mods;
@@ -110,9 +114,15 @@ namespace UIFramework.Core
         public void ToggleHidden(string modId)
         {
             if (_hidden.Contains(modId))
+            {
                 _hidden.Remove(modId);
+                RemoveTagFromMod(modId, "Hidden", isInternal: true);
+            }
             else
+            {
                 _hidden.Add(modId);
+                AddTagToMod(modId, "Hidden", isInternal: true);
+            }
 
             OnHiddenChanged?.Invoke();
             SaveHidden();
@@ -131,7 +141,15 @@ namespace UIFramework.Core
                 foreach (var modId in saved.Split(','))
                 {
                     if (!string.IsNullOrEmpty(modId))
-                        _hidden.Add(modId.Trim());
+                    {
+                        var trimmedId = modId.Trim();
+                        _hidden.Add(trimmedId);
+
+                        // Add Hidden tag to mod
+                        if (!_modTags.ContainsKey(trimmedId))
+                            _modTags[trimmedId] = new HashSet<string>();
+                        _modTags[trimmedId].Add("Hidden");
+                    }
                 }
             }
         }
@@ -232,7 +250,7 @@ namespace UIFramework.Core
         /// <summary>
         /// Add a tag to a mod (user action).
         /// </summary>
-        public void AddTagToMod(string modId, string tag)
+        public void AddTagToMod(string modId, string tag, bool isInternal = false)
         {
             if (string.IsNullOrWhiteSpace(tag)) return;
 
@@ -240,6 +258,10 @@ namespace UIFramework.Core
 
             // Don't add if it contains spaces
             if (tag.Contains(" ")) return;
+
+            // Prevent manual adding of Hidden tag - only via hiding
+            if (!isInternal && tag.Equals("Hidden", StringComparison.OrdinalIgnoreCase))
+                return;
 
             // Add to global custom tag list (if not system tag)
             if (!IsSystemTag(tag))
@@ -259,8 +281,12 @@ namespace UIFramework.Core
         /// <summary>
         /// Remove a tag from a mod (user action).
         /// </summary>
-        public void RemoveTagFromMod(string modId, string tag)
+        public void RemoveTagFromMod(string modId, string tag, bool isInternal = false)
         {
+            // Prevent manual removal of Hidden tag - only via unhiding
+            if (!isInternal && tag.Equals("Hidden", StringComparison.OrdinalIgnoreCase))
+                return;
+
             if (_modTags.TryGetValue(modId, out var tags))
             {
                 tags.Remove(tag);
@@ -651,10 +677,10 @@ namespace UIFramework.Core
                 }
             }
 
-            // Generate initials icon if still no icon found
+            // Get cached or generate initials icon if still no icon found
             if (modInfo.IconTexture == null)
             {
-                modInfo.IconTexture = GenerateInitialsIcon(modInfo.ModName, modInfo.ModId);
+                modInfo.IconTexture = GetOrCreateCachedIcon(modInfo.ModName, modInfo.ModId);
             }
 
             // Load images from explicit paths
@@ -837,6 +863,79 @@ namespace UIFramework.Core
             new Color(0.20f, 0.29f, 0.37f), // Dark
             new Color(0.61f, 0.35f, 0.71f), // Violet
         };
+
+        /// <summary>
+        /// Get cached icon or generate and cache it.
+        /// </summary>
+        private Texture2D GetOrCreateCachedIcon(string modName, string modId)
+        {
+            // Create cache directory if needed
+            try
+            {
+                if (!Directory.Exists(IconCacheDir))
+                {
+                    Directory.CreateDirectory(IconCacheDir);
+                }
+            }
+            catch (Exception ex)
+            {
+                Plugin.Log.LogWarning($"[ModHub] Failed to create icon cache directory: {ex.Message}");
+                return GenerateInitialsIcon(modName, modId);
+            }
+
+            // Build cache file path using modId hash + initials for uniqueness
+            string initials = GetInitials(modName);
+            string cacheFileName = $"{SanitizeFileName(modId)}_{initials}.png";
+            string cachePath = Path.Combine(IconCacheDir, cacheFileName);
+
+            // Try to load from cache
+            if (File.Exists(cachePath))
+            {
+                try
+                {
+                    byte[] data = File.ReadAllBytes(cachePath);
+                    Texture2D tex = new Texture2D(128, 128, TextureFormat.RGBA32, false);
+                    if (tex.LoadImage(data))
+                    {
+                        return tex;
+                    }
+                    UnityEngine.Object.Destroy(tex);
+                }
+                catch (Exception ex)
+                {
+                    Plugin.Log.LogWarning($"[ModHub] Failed to load cached icon for {modId}: {ex.Message}");
+                }
+            }
+
+            // Generate new icon
+            Texture2D icon = GenerateInitialsIcon(modName, modId);
+
+            // Save to cache
+            try
+            {
+                byte[] pngData = icon.EncodeToPNG();
+                File.WriteAllBytes(cachePath, pngData);
+            }
+            catch (Exception ex)
+            {
+                Plugin.Log.LogWarning($"[ModHub] Failed to cache icon for {modId}: {ex.Message}");
+            }
+
+            return icon;
+        }
+
+        /// <summary>
+        /// Sanitize string for use as filename.
+        /// </summary>
+        private string SanitizeFileName(string name)
+        {
+            char[] invalid = Path.GetInvalidFileNameChars();
+            foreach (char c in invalid)
+            {
+                name = name.Replace(c, '_');
+            }
+            return name;
+        }
 
         /// <summary>
         /// Generate an icon with initials from mod name.
@@ -1302,10 +1401,10 @@ namespace UIFramework.Core
                                       LoadEmbeddedTexture(assembly, "cover.png");
             }
 
-            // Generate initials icon if still no icon
+            // Get cached or generate initials icon if still no icon
             if (modInfo.IconTexture == null)
             {
-                modInfo.IconTexture = GenerateInitialsIcon(modInfo.ModName, modInfo.ModId);
+                modInfo.IconTexture = GetOrCreateCachedIcon(modInfo.ModName, modInfo.ModId);
             }
 
             // Build sections from config entries (grouped by section name)
